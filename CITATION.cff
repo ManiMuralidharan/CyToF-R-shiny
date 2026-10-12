@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "cytof-shiny: interactive CATALYST/diffcyt analysis app for mass cytometry"
+authors:
+  - family-names: Mani
+    given-names: Muralidharan
+    affiliation: "University of Wisconsin-Madison"
+orcid: "https://orcid.org/0000-0002-1194-3616"
+version: 3.0.0
+license: MIT
+repository-code: "https://github.com/ManiMuralidharan/cytof-shiny"
+keywords: [cytof, mass cytometry, shiny, bioconductor, CATALYST, diffcyt]
