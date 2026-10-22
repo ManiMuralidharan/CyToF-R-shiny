@@ -1,0 +1,137 @@
+---
+title: "CyTOF analysis (scripted, reproducible)"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+params:
+  config: "analysis/config.yml"
+---
+
+Run from the repository root:
+
+```bash
+quarto render analysis/analysis.qmd --execute-dir .
+```
+
+Every parameter lives in `analysis/config.yml`, so the same file run twice gives the same result.
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(CATALYST); library(diffcyt); library(ggplot2); library(SingleCellExperiment)
+})
+for (f in list.files("R", "\\.R$", full.names = TRUE)) source(f)
+cfg <- yaml::read_yaml(params$config)
+out <- cfg$output_dir; dir.create(file.path(out, "figures"), recursive = TRUE, showWarnings = FALSE)
+save_fig <- function(p, name, w = 10, h = 7) {
+  for (ext in c("pdf", "png")) {
+    f <- file.path(out, "figures", paste0(name, ".", ext))
+    if (ext == "pdf") grDevices::pdf(f, w, h) else grDevices::png(f, w, h, units = "in", res = 300)
+    draw_any(p); grDevices::dev.off()
+  }
+  draw_any(p)
+}
+```
+
+## 1. Data
+
+```{r data}
+d <- if (cfg$data$source == "example") load_example() else {
+  fcs <- list.files(cfg$data$fcs_dir, "\\.fcs$", full.names = TRUE, ignore.case = TRUE)
+  load_user(fcs, basename(fcs), cfg$data$metadata, cfg$data$panel)
+}
+sce <- build_sce(d$fs, d$panel, d$md, cofactor = cfg$data$cofactor)
+knitr::kable(get_ei(sce))
+```
+
+## 2. Quality control
+
+```{r qc, fig.height=8}
+save_fig(plotExprs(sce, color_by = "condition"), "qc_densities", 14, 10)
+save_fig(plotCounts(sce, group_by = "sample_id", color_by = "condition"), "qc_counts")
+save_fig(pbMDS(sce, color_by = "condition", label_by = "sample_id"), "qc_mds")
+save_fig(plotNRS(sce, features = "type", color_by = "condition"), "qc_nrs")
+save_fig(plotExprHeatmap(sce, features = "type", by = "sample_id", scale = "last", bars = TRUE), "qc_heatmap", 12, 8)
+```
+
+## 3. Clustering and embedding
+
+```{r cluster, fig.height=8}
+cc <- cfg$clustering
+sce <- run_clustering(sce, cc$features, cc$xdim, cc$ydim, cc$maxK, cc$seed)
+sce <- run_dr(sce, cc$dr, cc$dr_cells_per_sample, cc$features, cc$seed)
+print(metadata(sce)$delta_area)
+k <- cc$k
+save_fig(plotExprHeatmap(sce, features = "type", by = "cluster_id", k = k, scale = "first", bars = TRUE), "cluster_heatmap", 12, 9)
+save_fig(plotDR(sce, cc$dr, color_by = k), "embedding_clusters", 9, 7)
+save_fig(plotAbundances(sce, k = k, by = "sample_id", group_by = "condition"), "abundances", 12, 7)
+```
+
+## 4. Merging
+
+```{r merge, eval = !is.null(cfg$merge$table)}
+mt <- read_table_any(cfg$merge$table)
+sce <- apply_merge(sce, k, mt, cfg$merge$id)
+k <- cfg$merge$id
+save_fig(plotDR(sce, cc$dr, color_by = k), "embedding_merged", 9, 7)
+```
+
+## 5. Batch correction (diagnostic)
+
+```{r batch, eval = isTRUE(cfg$batch$run)}
+sce <- batch_correct(sce, cfg$batch$method, cfg$batch$var, npcs = cfg$batch$npcs,
+                     ref_dr = if (cc$dr == "UMAP") "UMAP" else "none", seed = cc$seed)
+diag <- batch_diagnostics(sce, cfg$batch$var, label_k = k, npcs = cfg$batch$npcs)
+knitr::kable(diag$summary, digits = 3)
+save_fig(plot_batch_umaps(sce, cfg$batch$var), "batch_umap", 14, 6)
+save_fig(plot_lisi(diag), "batch_lisi")
+```
+
+Batch-corrected values are used only for inspection. Differential testing below uses raw `exprs`; add the batch column to `differential.covariates` to adjust for it.
+
+## 6. Differential abundance
+
+```{r da, fig.height=8}
+dc <- cfg$differential
+model <- make_model(sce, dc$condition, dc$ref, dc$comp, unlist(dc$covariates), dc$random)
+da <- run_da(sce, model, k, dc$da_method)
+utils::write.csv(da$table, file.path(out, "DA_results.csv"), row.names = FALSE)
+knitr::kable(da$table, digits = 4)
+save_fig(plotDiffHeatmap(sce, rowData(da$res$res), k = k, fdr = dc$fdr, all = TRUE, sort_by = "padj"), "DA_heatmap", 14, 9)
+save_fig(plot_da_forest(da$table, dc$fdr), "DA_forest")
+save_fig(plot_paired_props(sce, k, model), "DA_proportions", 12, 10)
+save_fig(plot_pval_hist(da$table), "DA_pvalue_hist", 6, 4)
+```
+
+## 7. Differential state
+
+```{r ds, eval = length(state_markers(sce)) > 0, fig.height=10}
+ds <- run_ds(sce, model, k, dc$ds_method)
+utils::write.csv(ds$table, file.path(out, "DS_results.csv"), row.names = FALSE)
+cat(sum(ds$table$p_adj < dc$fdr, na.rm = TRUE), "significant cluster-marker pairs\n")
+save_fig(plotDiffHeatmap(sce, rowData(ds$res$res), k = k, fdr = dc$fdr, top_n = 50, sort_by = "padj"), "DS_heatmap", 14, 12)
+save_fig(plot_volcano(ds$table, "delta_median", dc$fdr, xlab = "Difference in median expression"), "DS_volcano")
+```
+
+## 8. Marker enrichment
+
+```{r mem, fig.height=8}
+mem <- compute_mem(sce, k)
+utils::write.csv(data.frame(cluster = rownames(mem), label = mem_labels(mem, 6), mem, check.names = FALSE),
+                 file.path(out, "MEM_scores.csv"), row.names = FALSE)
+save_fig(plot_mem(mem), "MEM_heatmap", 12, 9)
+```
+
+## 9. Outputs
+
+```{r save}
+metadata(sce)$config <- cfg
+saveRDS(sce, file.path(out, "sce.rds"))
+utils::write.csv(abundance_table(sce, k), file.path(out, "abundances.csv"), row.names = FALSE)
+writeLines(capture.output(sessionInfo()), file.path(out, "sessionInfo.txt"))
+list.files(out, recursive = TRUE)
+```
