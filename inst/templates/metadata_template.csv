@@ -1,0 +1,5 @@
+file_name,sample_id,condition,patient_id,batch
+patient1_ref.fcs,Ref1,Ref,P1,B1
+patient1_stim.fcs,Stim1,Stim,P1,B1
+patient2_ref.fcs,Ref2,Ref,P2,B2
+patient2_stim.fcs,Stim2,Stim,P2,B2

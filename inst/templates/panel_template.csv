@@ -1,0 +1,8 @@
+fcs_colname,antigen,marker_class
+Nd142Di,CD19,type
+Nd145Di,CD4,type
+Nd146Di,CD8,type
+Sm147Di,CD20,type
+Nd150Di,pSTAT5,state
+Er167Di,pERK,state
+Ir191Di,DNA1,none
