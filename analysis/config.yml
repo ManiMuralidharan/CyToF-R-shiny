@@ -1,0 +1,41 @@
+# Parameters for the scripted analysis (analysis/analysis.qmd).
+# Paths are relative to the repository root.
+
+data:
+  source: example            # "example" (CATALYST PBMC data) or "files"
+  fcs_dir: data/fcs          # folder with .fcs files (source: files)
+  metadata: data/metadata.csv
+  panel: data/panel.csv
+  cofactor: 5                # 5 for mass cytometry, 150 for flow / spectral
+
+clustering:
+  features: type             # "type" or a list of antigens
+  xdim: 10
+  ydim: 10
+  maxK: 20
+  k: meta20                  # clustering used downstream (or a merge id)
+  seed: 1234
+  dr: UMAP
+  dr_cells_per_sample: 1000
+
+merge:
+  table: null                # e.g. data/merge_table.csv (old_cluster,new_cluster)
+  id: merging1
+
+batch:
+  run: false
+  var: batch
+  method: harmony            # harmony | cycombine | limma
+  npcs: 20
+
+differential:
+  condition: condition
+  ref: Ref
+  comp: BCRXL
+  covariates: []             # e.g. [batch]
+  random: patient_id         # null for unpaired designs
+  da_method: GLMM            # GLMM | edgeR | voom
+  ds_method: LMM             # LMM | limma
+  fdr: 0.05
+
+output_dir: results
