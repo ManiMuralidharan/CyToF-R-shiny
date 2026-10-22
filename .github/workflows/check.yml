@@ -1,0 +1,14 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: bioconductor/bioconductor_docker:RELEASE_3_21
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: Rscript install.R
+      - name: Parse app
+        run: Rscript -e 'invisible(parse("app.R"))'
+      - name: Run tests
+        run: Rscript tests/testthat.R
