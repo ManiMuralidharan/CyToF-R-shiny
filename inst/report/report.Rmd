@@ -1,0 +1,95 @@
+---
+title: "CyTOF analysis report"
+date: "`r format(Sys.time(), '%Y-%m-%d %H:%M')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+params:
+  state: NULL
+  rdir: NULL
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+suppressPackageStartupMessages({ library(CATALYST); library(ggplot2); library(SingleCellExperiment) })
+for (f in list.files(params$rdir, "\\.R$", full.names = TRUE)) source(f)
+st <- readRDS(params$state)
+sce <- st$sce
+show <- function(p) draw_any(p)
+```
+
+## Data
+
+```{r}
+ei <- get_ei(sce)
+cat(sprintf("%s cells, %d samples, %d type markers, %d state markers\n",
+            format(ncol(sce), big.mark = ","), nrow(ei), length(type_markers(sce)), length(state_markers(sce))))
+knitr::kable(ei)
+```
+
+## Quality control
+
+```{r, fig.height=4}
+plotCounts(sce, group_by = "sample_id", color_by = "condition")
+```
+
+```{r}
+pbMDS(sce, color_by = "condition", label_by = "sample_id")
+show(plotExprHeatmap(sce, features = "type", by = "sample_id", scale = "last", bars = TRUE))
+```
+
+## Clustering
+
+```{r, eval = !is.null(st$k) && st$k %in% clustering_names(sce), fig.height=8}
+show(plotExprHeatmap(sce, features = "type", by = "cluster_id", k = st$k, scale = "first", bars = TRUE))
+if (!is.null(st$dr) && st$dr %in% reducedDimNames(sce)) print(plotDR(sce, st$dr, color_by = st$k))
+plotAbundances(sce, k = st$k, by = "sample_id", group_by = "condition")
+```
+
+## Batch correction
+
+```{r, eval = !is.null(metadata(sce)$batch)}
+b <- metadata(sce)$batch
+cat("Method:", b$method, "| variable:", b$var, "\n")
+if ("UMAP" %in% reducedDimNames(sce)) print(plot_batch_umaps(sce, b$var))
+if (!is.null(st$diag)) knitr::kable(st$diag$summary, digits = 3)
+```
+
+## Differential abundance
+
+```{r, eval = !is.null(st$da)}
+m <- st$da$model
+cat(sprintf("Method: %s | clustering: %s | %s vs %s | covariates: %s | random: %s\n",
+            st$da$method, st$da$k, m$comp, m$ref, paste(setdiff(m$fixed, m$condition_var), collapse = ", ") %||% "none",
+            m$random %||% "none"))
+knitr::kable(st$da$table, digits = 4)
+print(plot_da_forest(st$da$table, st$fdr_da))
+print(plot_paired_props(sce, st$da$k, m))
+```
+
+## Differential state
+
+```{r, eval = !is.null(st$ds)}
+m <- st$ds$model
+cat(sprintf("Method: %s | clustering: %s | %s vs %s\n", st$ds$method, st$ds$k, m$comp, m$ref))
+sig <- st$ds$table[!is.na(st$ds$table$p_adj) & st$ds$table$p_adj < st$fdr_ds, ]
+cat(nrow(sig), "significant cluster-marker pairs at FDR <", st$fdr_ds, "\n")
+knitr::kable(head(st$ds$table, 40), digits = 4)
+print(plot_volcano(st$ds$table, "delta_median", st$fdr_ds, xlab = "Difference in median expression"))
+```
+
+## Marker enrichment (MEM)
+
+```{r, eval = !is.null(st$mem), fig.height=8}
+show(plot_mem(st$mem))
+```
+
+## Parameters & reproducibility
+
+```{r}
+str(st$log, max.level = 3, give.attr = FALSE)
+sessionInfo()
+```
